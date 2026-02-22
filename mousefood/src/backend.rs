@@ -241,9 +241,9 @@ where
             self.draw_cell(x, y, cell)?;
         }
 
-        // Avoids redrawing unneccesarily
+        // Avoids redrawing unnecessarily
         if blink_toggled && !self.blink_cells.is_empty() {
-            // Neccesary to mem::take otherwise compiler complains about mutating self while iterating
+            // Necessary to mem::take otherwise compiler complains about mutating self while iterating
             let cells = core::mem::take(&mut self.blink_cells);
             for (&(x, y), cell) in &cells {
                 self.draw_cell(x, y, cell)?;
