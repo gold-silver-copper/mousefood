@@ -120,7 +120,7 @@ where
     color_theme: ColorTheme,
     cursor_visible: bool,
     cursor_position: layout::Position,
-    blink_counter: u8,
+    frame_count: usize,
     blinking_fast: bool,
     blinking_slow: bool,
     blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
@@ -183,7 +183,7 @@ where
             color_theme,
             cursor_visible: false,
             cursor_position: layout::Position::new(0, 0),
-            blink_counter: 0,
+            frame_count: 0,
             blinking_fast: false,
             blinking_slow: false,
             blink_cells: BTreeMap::new(),
@@ -222,11 +222,11 @@ where
     where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
-        self.blink_counter = (self.blink_counter + 1) % 60;
+        self.frame_count = self.frame_count.wrapping_add(1);
         let prev_slow = self.blinking_slow;
         let prev_fast = self.blinking_fast;
-        self.blinking_slow = matches!(self.blink_counter, 20..=25);
-        self.blinking_fast = matches!(self.blink_counter % 20, 0..=5);
+        self.blinking_slow = self.frame_count % 60 > 30;
+        self.blinking_fast = self.frame_count % 20 > 10;
         let blink_toggled = self.blinking_slow != prev_slow || self.blinking_fast != prev_fast;
 
         for (x, y, cell) in content {
