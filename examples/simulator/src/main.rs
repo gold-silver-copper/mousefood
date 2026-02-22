@@ -134,4 +134,5 @@ fn draw2(frame: &mut Frame, count: usize) {
         .border_style(Style::new().yellow())
         .title("Modifier Test");
     frame.render_widget(paragraph.block(bordered_block), frame.area());
+    frame.set_cursor_position((1, 1));
 }

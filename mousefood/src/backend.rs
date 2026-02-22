@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use core::marker::PhantomData;
+use embedded_graphics::prelude::RgbColor;
 
 use crate::colors::*;
 use crate::default_font;
@@ -117,6 +118,8 @@ where
     columns_rows: layout::Size,
     pixels: layout::Size,
     color_theme: ColorTheme,
+    cursor_visible: bool,
+    cursor_position: layout::Position,
     blink_counter: u8,
     blinking_fast: bool,
     blinking_slow: bool,
@@ -178,6 +181,8 @@ where
             },
             pixels,
             color_theme,
+            cursor_visible: false,
+            cursor_position: layout::Position::new(0, 0),
             blink_counter: 0,
             blinking_fast: false,
             blinking_slow: false,
@@ -250,25 +255,21 @@ where
     }
 
     fn hide_cursor(&mut self) -> Result<()> {
-        // TODO
+        self.cursor_visible = false;
         Ok(())
     }
 
     fn show_cursor(&mut self) -> Result<()> {
-        // TODO
+        self.cursor_visible = true;
         Ok(())
     }
 
     fn get_cursor_position(&mut self) -> Result<layout::Position> {
-        // TODO
-        Ok(layout::Position::new(0, 0))
+        Ok(self.cursor_position)
     }
 
-    fn set_cursor_position<P: Into<layout::Position>>(
-        &mut self,
-        #[allow(unused_variables)] position: P,
-    ) -> Result<()> {
-        // TODO
+    fn set_cursor_position<P: Into<layout::Position>>(&mut self, position: P) -> Result<()> {
+        self.cursor_position = position.into();
         Ok(())
     }
 
@@ -328,6 +329,11 @@ where
         self.display
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
+        // Draw cursor after buffer is copied to display
+        if self.cursor_visible && self.blinking_fast {
+            self.draw_cursor()?;
+        }
+
         (self.flush_callback)(self.display);
         Ok(())
     }
@@ -423,6 +429,25 @@ where
         .map_err(|_| crate::error::Error::DrawError)?;
 
         Ok(())
+    }
+    fn draw_cursor(&mut self) -> Result<()> {
+        let char_w = self.font_regular.character_size.width as i32;
+        let char_h = self.font_regular.character_size.height as i32;
+
+        let top_left = geometry::Point::new(
+            self.cursor_position.x as i32 * char_w,
+            self.cursor_position.y as i32 * char_h,
+        ) + self.char_offset;
+
+        self.display
+            .fill_solid(
+                &embedded_graphics::primitives::Rectangle::new(
+                    geometry::Point::new(top_left.x, top_left.y + char_h - 2),
+                    geometry::Size::new(char_w as u32, 1),
+                ),
+                Rgb888::WHITE.into(),
+            )
+            .map_err(|_| crate::error::Error::DrawError)
     }
 }
 
