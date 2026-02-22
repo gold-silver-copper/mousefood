@@ -451,21 +451,35 @@ where
     fn draw_cursor(&mut self) -> Result<()> {
         let char_w = self.font_regular.character_size.width as i32;
         let char_h = self.font_regular.character_size.height as i32;
-
         let top_left = geometry::Point::new(
             self.cursor_position.x as i32 * char_w,
             self.cursor_position.y as i32 * char_h,
         ) + self.char_offset;
 
+        #[cfg(feature = "framebuffer")]
+        for y in top_left.y..top_left.y + char_h {
+            for x in top_left.x..top_left.x + char_w {
+                let point = geometry::Point::new(x, y);
+                let rgb: Rgb888 = self.buffer.get_pixel(point).into();
+                let inverted: C = Rgb888::new(!rgb.r(), !rgb.g(), !rgb.b()).into();
+                self.display
+                    .draw_iter(core::iter::once(embedded_graphics::Pixel(point, inverted)))
+                    .map_err(|_| crate::error::Error::DrawError)?;
+            }
+        }
+
+        #[cfg(not(feature = "framebuffer"))]
         self.display
             .fill_solid(
                 &embedded_graphics::primitives::Rectangle::new(
-                    geometry::Point::new(top_left.x, top_left.y + char_h - 2),
+                    geometry::Point::new(top_left.x, top_left.y + char_h - 1),
                     geometry::Size::new(char_w as u32, 1),
                 ),
                 Rgb888::WHITE.into(),
             )
-            .map_err(|_| crate::error::Error::DrawError)
+            .map_err(|_| crate::error::Error::DrawError)?;
+
+        Ok(())
     }
 }
 
