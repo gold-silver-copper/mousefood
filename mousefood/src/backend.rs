@@ -51,6 +51,9 @@ where
 
     /// Color theme that maps Ratatui colors to display pixels.
     pub color_theme: ColorTheme,
+
+    /// Speed at which cursor and modifiers blink. Lower is Slower, defaults to 2.
+    pub blink_speed: usize,
 }
 
 impl<D, C> Default for EmbeddedBackendConfig<D, C>
@@ -67,6 +70,7 @@ where
             vertical_alignment: TerminalAlignment::Start,
             horizontal_alignment: TerminalAlignment::Start,
             color_theme: ColorTheme::default(),
+            blink_speed: 2,
         }
     }
 }
@@ -122,6 +126,7 @@ where
     cursor_position: layout::Position,
     frame_count: usize,
     blinking: Option<BlinkPhase>,
+    blink_speed: usize,
     blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
 }
 
@@ -142,6 +147,7 @@ where
             vertical_alignment,
             horizontal_alignment,
             color_theme,
+            blink_speed,
         } = config;
         let pixels = layout::Size {
             width: display.bounding_box().size.width as u16,
@@ -184,6 +190,7 @@ where
             cursor_position: layout::Position::new(0, 0),
             frame_count: 0,
             blinking: None,
+            blink_speed,
             blink_cells: BTreeMap::new(),
         }
     }
@@ -223,9 +230,9 @@ where
         self.frame_count = self.frame_count.wrapping_add(1);
         let prev_blinking = self.blinking;
 
-        let phase = self.frame_count % 60;
-        let slow_hidden = phase < 8; // hidden ~13% of the time let
-        let fast_hidden = phase % 10 < 5; // hidden 50% of the time
+        let phase = self.frame_count % (1 + 120 / self.blink_speed.max(1) as usize);
+        let slow_hidden = phase == 0;
+        let fast_hidden = phase % (1 + 20 / self.blink_speed.max(1) as usize) == 0;
 
         self.blinking = match (slow_hidden, fast_hidden) {
             (true, true) => Some(BlinkPhase::Slow),  // both hidden
