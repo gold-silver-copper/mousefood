@@ -430,6 +430,7 @@ where
 
         Ok(())
     }
+
     fn draw_cursor(&mut self) -> Result<()> {
         let char_w = self.font_regular.character_size.width as i32;
         let char_h = self.font_regular.character_size.height as i32;
