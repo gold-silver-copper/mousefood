@@ -56,9 +56,12 @@ fn main() -> Result<(), Error> {
     // Start ratatui with our simulator backend
     let mut terminal = Terminal::new(backend)?;
 
-    // Run an infinite loop, where widgets will be rendered
+    let mut frame_count: usize = 0;
+
     loop {
-        terminal.draw(draw2)?;
+        let count = frame_count;
+        terminal.draw(|frame| draw2(frame, count))?;
+        frame_count = frame_count.wrapping_add(1);
     }
 }
 
@@ -70,11 +73,15 @@ fn draw(frame: &mut Frame) {
         .title("Mousefood");
     frame.render_widget(paragraph.block(bordered_block), frame.area());
 }
-fn draw2(frame: &mut Frame) {
+fn draw2(frame: &mut Frame, count: usize) {
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span};
 
     let lines = vec![
+        Line::from(Span::styled(
+            format!("Frame: {count}"),
+            Style::new().yellow(),
+        )),
         Line::from(Span::styled(
             "BOLD text",
             Style::new().add_modifier(Modifier::BOLD),

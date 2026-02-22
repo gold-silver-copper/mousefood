@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use core::marker::PhantomData;
 
 use crate::colors::*;
@@ -116,6 +117,10 @@ where
     columns_rows: layout::Size,
     pixels: layout::Size,
     color_theme: ColorTheme,
+    blink_counter: u8,
+    blinking_fast: bool,
+    blinking_slow: bool,
+    blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
 }
 
 impl<'display, D, C> EmbeddedBackend<'display, D, C>
@@ -173,6 +178,10 @@ where
             },
             pixels,
             color_theme,
+            blink_counter: 0,
+            blinking_fast: false,
+            blinking_slow: false,
+            blink_cells: BTreeMap::new(),
         }
     }
 
@@ -208,78 +217,35 @@ where
     where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
+        self.blink_counter = (self.blink_counter + 1) % 60;
+        let prev_slow = self.blinking_slow;
+        let prev_fast = self.blinking_fast;
+        self.blinking_slow = matches!(self.blink_counter, 20..=25);
+        self.blinking_fast = matches!(self.blink_counter % 20, 0..=5);
+        let blink_toggled = self.blinking_slow != prev_slow || self.blinking_fast != prev_fast;
+
         for (x, y, cell) in content {
-            let position = geometry::Point::new(
-                x as i32 * self.font_regular.character_size.width as i32,
-                y as i32 * self.font_regular.character_size.height as i32,
-            );
-            let mut fg_color =
-                TermColor::new(cell.fg, TermColorType::Foreground, &self.color_theme).into();
-            let mut bg_color =
-                TermColor::new(cell.bg, TermColorType::Background, &self.color_theme).into();
-            let mut style_builder = MonoTextStyleBuilder::new()
-                .font(&self.font_regular)
-                .text_color(fg_color)
-                .background_color(bg_color);
-            for modifier in cell.modifier.iter() {
-                style_builder = match modifier {
-                    style::Modifier::BOLD => match &self.font_bold {
-                        None => style_builder,
-                        Some(font) => style_builder.font(font),
-                    },
-                    style::Modifier::DIM => {
-                        fg_color = dim_color(fg_color);
-                        style_builder
-                    }
-                    style::Modifier::ITALIC => match &self.font_italic {
-                        None => style_builder,
-                        Some(font) => style_builder.font(font),
-                    },
-                    style::Modifier::UNDERLINED => style_builder.underline(),
-                    style::Modifier::SLOW_BLINK => style_builder, // TODO
-                    style::Modifier::RAPID_BLINK => style_builder, // TODO
-                    style::Modifier::REVERSED => {
-                        core::mem::swap(&mut fg_color, &mut bg_color);
-                        style_builder
-                    }
-                    style::Modifier::HIDDEN => {
-                        fg_color = bg_color;
-                        style_builder
-                    }
-                    style::Modifier::CROSSED_OUT => style_builder.strikethrough(),
-                    _ => style_builder,
-                }
-            }
-            style_builder = style_builder
-                .text_color(fg_color)
-                .background_color(bg_color);
-
-            #[cfg(feature = "underline-color")]
-            if cell.underline_color != style::Color::Reset {
-                style_builder = style_builder.underline_with_color(
-                    TermColor::new(
-                        cell.underline_color,
-                        TermColorType::Foreground,
-                        &self.color_theme,
-                    )
-                    .into(),
-                );
+            if cell.modifier.contains(style::Modifier::SLOW_BLINK)
+                || cell.modifier.contains(style::Modifier::RAPID_BLINK)
+            {
+                self.blink_cells.insert((x, y), cell.clone());
+            } else {
+                self.blink_cells.remove(&(x, y));
             }
 
-            Text::with_baseline(
-                cell.symbol(),
-                position + self.char_offset,
-                style_builder.build(),
-                embedded_graphics::text::Baseline::Top,
-            )
-            .draw(
-                #[cfg(feature = "framebuffer")]
-                &mut self.buffer,
-                #[cfg(not(feature = "framebuffer"))]
-                self.display,
-            )
-            .map_err(|_| crate::error::Error::DrawError)?;
+            self.draw_cell(x, y, cell)?;
         }
+
+        // Avoids redrawing unneccesarily
+        if blink_toggled && !self.blink_cells.is_empty() {
+            // Neccesary to mem::take otherwise compiler complains about mutating self while iterating
+            let cells = core::mem::take(&mut self.blink_cells);
+            for (&(x, y), cell) in &cells {
+                self.draw_cell(x, y, cell)?;
+            }
+            self.blink_cells = cells;
+        }
+
         Ok(())
     }
 
@@ -363,6 +329,99 @@ where
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
         (self.flush_callback)(self.display);
+        Ok(())
+    }
+}
+
+impl<D, C> EmbeddedBackend<'_, D, C>
+where
+    D: DrawTarget<Color = C> + 'static,
+    C: PixelColor + Into<Rgb888> + From<Rgb888> + for<'a> From<TermColor<'a>> + 'static,
+{
+    fn draw_cell(&mut self, x: u16, y: u16, cell: &ratatui_core::buffer::Cell) -> Result<()> {
+        let position = geometry::Point::new(
+            x as i32 * self.font_regular.character_size.width as i32,
+            y as i32 * self.font_regular.character_size.height as i32,
+        );
+        let mut fg_color: C =
+            TermColor::new(cell.fg, TermColorType::Foreground, &self.color_theme).into();
+        let mut bg_color: C =
+            TermColor::new(cell.bg, TermColorType::Background, &self.color_theme).into();
+        let mut style_builder = MonoTextStyleBuilder::new()
+            .font(&self.font_regular)
+            .text_color(fg_color)
+            .background_color(bg_color);
+
+        for modifier in cell.modifier.iter() {
+            style_builder = match modifier {
+                style::Modifier::BOLD => match &self.font_bold {
+                    None => style_builder,
+                    Some(font) => style_builder.font(font),
+                },
+                style::Modifier::DIM => {
+                    fg_color = dim_color(fg_color);
+                    style_builder
+                }
+                style::Modifier::ITALIC => match &self.font_italic {
+                    None => style_builder,
+                    Some(font) => style_builder.font(font),
+                },
+                style::Modifier::UNDERLINED => style_builder.underline(),
+                style::Modifier::SLOW_BLINK => {
+                    if self.blinking_slow {
+                        fg_color = bg_color;
+                    }
+                    style_builder
+                }
+                style::Modifier::RAPID_BLINK => {
+                    if self.blinking_fast {
+                        fg_color = bg_color;
+                    }
+                    style_builder
+                }
+                style::Modifier::REVERSED => {
+                    core::mem::swap(&mut fg_color, &mut bg_color);
+                    style_builder
+                }
+                style::Modifier::HIDDEN => {
+                    fg_color = bg_color;
+                    style_builder
+                }
+                style::Modifier::CROSSED_OUT => style_builder.strikethrough(),
+                _ => style_builder,
+            }
+        }
+
+        style_builder = style_builder
+            .text_color(fg_color)
+            .background_color(bg_color);
+
+        #[cfg(feature = "underline-color")]
+        if cell.underline_color != style::Color::Reset {
+            style_builder = style_builder.underline_with_color(
+                TermColor::new(
+                    cell.underline_color,
+                    TermColorType::Foreground,
+                    &self.color_theme,
+                )
+                .into(),
+            );
+        }
+
+        Text::with_baseline(
+            cell.symbol(),
+            position + self.char_offset,
+            style_builder.build(),
+            embedded_graphics::text::Baseline::Top,
+        )
+        .draw(
+            #[cfg(feature = "framebuffer")]
+            &mut self.buffer,
+            #[cfg(not(feature = "framebuffer"))]
+            self.display,
+        )
+        .map_err(|_| crate::error::Error::DrawError)?;
+
         Ok(())
     }
 }
