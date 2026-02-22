@@ -227,7 +227,10 @@ where
                         None => style_builder,
                         Some(font) => style_builder.font(font),
                     },
-                    style::Modifier::DIM => style_builder, // TODO
+                    style::Modifier::DIM => {
+                        fg_color = dim_color(fg_color);
+                        style_builder
+                    }
                     style::Modifier::ITALIC => match &self.font_italic {
                         None => style_builder,
                         Some(font) => style_builder.font(font),
