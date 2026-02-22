@@ -121,8 +121,7 @@ where
     cursor_visible: bool,
     cursor_position: layout::Position,
     frame_count: usize,
-    blinking_fast: bool,
-    blinking_slow: bool,
+    blinking: Option<BlinkPhase>,
     blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
 }
 
@@ -184,8 +183,7 @@ where
             cursor_visible: false,
             cursor_position: layout::Position::new(0, 0),
             frame_count: 0,
-            blinking_fast: false,
-            blinking_slow: false,
+            blinking: None,
             blink_cells: BTreeMap::new(),
         }
     }
@@ -223,11 +221,18 @@ where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
         self.frame_count = self.frame_count.wrapping_add(1);
-        let prev_slow = self.blinking_slow;
-        let prev_fast = self.blinking_fast;
-        self.blinking_slow = self.frame_count % 60 > 30;
-        self.blinking_fast = self.frame_count % 20 > 10;
-        let blink_toggled = self.blinking_slow != prev_slow || self.blinking_fast != prev_fast;
+        let prev_blinking = self.blinking;
+
+        let phase = self.frame_count % 60;
+        let slow_hidden = phase < 8; // hidden ~13% of the time let
+        let fast_hidden = phase % 10 < 5; // hidden 50% of the time
+
+        self.blinking = match (slow_hidden, fast_hidden) {
+            (true, true) => Some(BlinkPhase::Slow),  // both hidden
+            (false, true) => Some(BlinkPhase::Fast), // only fast hidden
+            _ => None,                               // all visible
+        };
+        let blink_toggled = self.blinking != prev_blinking;
 
         for (x, y, cell) in content {
             if cell.modifier.contains(style::Modifier::SLOW_BLINK)
@@ -329,14 +334,19 @@ where
         self.display
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
-        // Draw cursor after buffer is copied to display
-        if self.cursor_visible && self.blinking_fast {
+        if self.cursor_visible && !(self.blinking == Some(BlinkPhase::Slow)) {
             self.draw_cursor()?;
         }
 
         (self.flush_callback)(self.display);
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum BlinkPhase {
+    Slow,
+    Fast,
 }
 
 impl<D, C> EmbeddedBackend<'_, D, C>
@@ -374,13 +384,13 @@ where
                 },
                 style::Modifier::UNDERLINED => style_builder.underline(),
                 style::Modifier::SLOW_BLINK => {
-                    if self.blinking_slow {
+                    if matches!(self.blinking, Some(BlinkPhase::Slow)) {
                         fg_color = bg_color;
                     }
                     style_builder
                 }
                 style::Modifier::RAPID_BLINK => {
-                    if self.blinking_fast {
+                    if self.blinking.is_some() {
                         fg_color = bg_color;
                     }
                     style_builder
