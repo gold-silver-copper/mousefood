@@ -175,16 +175,16 @@ impl<'a> From<TermColor<'a>> for BinaryColor {
         }
     }
 }
+fn dim_u8(v: u8) -> u8 {
+    (v >> 2) + (v >> 5) // ≈ 28%
+}
+
 pub fn dim_color<C>(color: C) -> C
 where
     C: Into<Rgb888> + From<Rgb888>,
 {
     let rgb: Rgb888 = color.into();
-    let factor = 77u32; // ~30% brightness
-    let r = ((rgb.r() as u32 * factor + 127) / 255) as u8;
-    let g = ((rgb.g() as u32 * factor + 127) / 255) as u8;
-    let b = ((rgb.b() as u32 * factor + 127) / 255) as u8;
-    Rgb888::new(r, g, b).into()
+    Rgb888::new(dim_u8(rgb.r()), dim_u8(rgb.g()), dim_u8(rgb.b())).into()
 }
 #[cfg(feature = "epd-weact")]
 impl<'a> From<TermColor<'a>> for weact_studio_epd::Color {
