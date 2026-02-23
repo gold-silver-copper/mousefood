@@ -72,12 +72,36 @@ pub struct BlinkTiming {
     pub blinks_per_sec: u8,
     /// Fraction of each cycle spent hidden (0.0–1.0).
     pub duty: f32,
+    hidden: bool,
+}
+
+impl BlinkTiming {
+    /// Returns `true` if the element is currently hidden.
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+
+    fn update(&mut self, frame_count: usize, fps: u8) {
+        if self.blinks_per_sec == 0 || fps == 0 {
+            self.hidden = false;
+            return;
+        }
+        let cycle_len = fps as usize / self.blinks_per_sec as usize;
+        if cycle_len == 0 {
+            self.hidden = false;
+            return;
+        }
+        let pos = frame_count % cycle_len;
+        let hidden_frames = ((self.duty * cycle_len as f32) as usize).max(1);
+        self.hidden = pos >= cycle_len - hidden_frames;
+    }
 }
 
 /// Blink configuration for text modifiers and cursor.
 ///
 /// Frame-based timing: visibility is computed from `frame_count`, `fps`,
 /// and per-pattern `BlinkTiming`.
+/// Owns all blink state. Call [`BlinkConfig::tick`] once per frame to advance.
 #[derive(Clone, Copy)]
 pub struct BlinkConfig {
     /// Display refresh rate. Converts frame counts to time.
@@ -86,6 +110,19 @@ pub struct BlinkConfig {
     pub slow: BlinkTiming,
     /// Timing for `Modifier::RAPID_BLINK`.
     pub fast: BlinkTiming,
+    prev_state: (bool, bool),
+}
+
+impl BlinkConfig {
+    /// Advance blink state for the current frame. Returns `true` if visibility changed.
+    pub fn tick(&mut self, frame_count: usize) -> bool {
+        self.slow.update(frame_count, self.fps);
+        self.fast.update(frame_count, self.fps);
+        let state = (self.slow.hidden, self.fast.hidden);
+        let toggled = state != self.prev_state;
+        self.prev_state = state;
+        toggled
+    }
 }
 
 impl Default for BlinkConfig {
@@ -95,28 +132,15 @@ impl Default for BlinkConfig {
             slow: BlinkTiming {
                 blinks_per_sec: 1,
                 duty: 0.15,
+                hidden: false,
             },
             fast: BlinkTiming {
                 blinks_per_sec: 3,
                 duty: 0.5,
+                hidden: false,
             },
+            prev_state: (false, false),
         }
-    }
-}
-
-impl BlinkTiming {
-    /// Returns `true` if the element should be hidden at the given frame count.
-    pub fn is_hidden(&self, frame_count: usize, fps: u8) -> bool {
-        if self.blinks_per_sec == 0 || fps == 0 {
-            return false;
-        }
-        let cycle_len = fps as usize / self.blinks_per_sec as usize;
-        if cycle_len == 0 {
-            return false;
-        }
-        let pos = frame_count % cycle_len;
-        let hidden_frames = ((self.duty * cycle_len as f32) as usize).max(1);
-        pos >= cycle_len - hidden_frames
     }
 }
 
@@ -225,8 +249,6 @@ where
     cursor_config: CursorConfig,
     frame_count: usize,
     blink_config: BlinkConfig,
-    slow_hidden: bool,
-    fast_hidden: bool,
     blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
 }
 
@@ -292,8 +314,6 @@ where
             cursor_config: cursor,
             frame_count: 0,
             blink_config: blink,
-            slow_hidden: false,
-            fast_hidden: false,
             blink_cells: BTreeMap::new(),
         }
     }
@@ -331,21 +351,7 @@ where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
         self.frame_count = self.frame_count.wrapping_add(1);
-
-        let prev_slow = self.slow_hidden;
-        let prev_fast = self.fast_hidden;
-
-        self.slow_hidden = self
-            .blink_config
-            .slow
-            .is_hidden(self.frame_count, self.blink_config.fps);
-        self.fast_hidden = self
-            .blink_config
-            .fast
-            .is_hidden(self.frame_count, self.blink_config.fps);
-
-        let blink_toggled =
-            self.slow_hidden != prev_slow || self.fast_hidden != prev_fast;
+        let blink_toggled = self.blink_config.tick(self.frame_count);
 
         for (x, y, cell) in content {
             if cell.modifier.contains(style::Modifier::SLOW_BLINK)
@@ -446,11 +452,8 @@ where
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
 
-        let cursor_hidden = self.cursor_config.blink
-            && self
-                .blink_config
-                .slow
-                .is_hidden(self.frame_count, self.blink_config.fps);
+        let cursor_hidden =
+            self.cursor_config.blink && self.blink_config.slow.is_hidden();
 
         if self.cursor_visible && !cursor_hidden {
             self.draw_cursor()?;
@@ -496,13 +499,13 @@ where
                 },
                 style::Modifier::UNDERLINED => style_builder.underline(),
                 style::Modifier::SLOW_BLINK => {
-                    if self.slow_hidden {
+                    if self.blink_config.slow.is_hidden() {
                         fg_color = bg_color;
                     }
                     style_builder
                 }
                 style::Modifier::RAPID_BLINK => {
-                    if self.fast_hidden {
+                    if self.blink_config.fast.is_hidden() {
                         fg_color = bg_color;
                     }
                     style_builder
@@ -567,26 +570,21 @@ where
 
             #[cfg(not(feature = "framebuffer"))]
             CursorStyle::Inverse => {
-                // Can't read pixels without framebuffer, fall back to underline
                 let color: C = self.cursor_color();
-                self.draw_cursor_line(top_left, char_w, char_h - 1, 0, char_w, 1, color)
+                self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)
             }
 
             CursorStyle::Underline => {
                 let color: C = self.cursor_color();
-                self.draw_cursor_line(top_left, char_w, char_h - 1, 0, char_w, 1, color)
+                self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)
             }
 
             CursorStyle::Outline => {
                 let color: C = self.cursor_color();
-                // top
-                self.draw_cursor_line(top_left, char_w, 0, 0, char_w, 1, color)?;
-                // bottom
-                self.draw_cursor_line(top_left, char_w, char_h - 1, 0, char_w, 1, color)?;
-                // left
-                self.draw_cursor_line(top_left, char_w, 0, 0, 1, char_h, color)?;
-                // right
-                self.draw_cursor_line(top_left, char_w, 0, char_w - 1, 1, char_h, color)
+                self.draw_cursor_line(top_left, 0, 0, char_w, 1, color)?;
+                self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)?;
+                self.draw_cursor_line(top_left, 0, 0, 1, char_h, color)?;
+                self.draw_cursor_line(top_left, 0, char_w - 1, 1, char_h, color)
             }
         }
     }
@@ -598,7 +596,6 @@ where
     fn draw_cursor_line(
         &mut self,
         top_left: geometry::Point,
-        _char_w: i32,
         dy: i32,
         dx: i32,
         w: i32,
