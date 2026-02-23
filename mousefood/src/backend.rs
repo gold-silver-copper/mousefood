@@ -28,9 +28,11 @@ pub enum TerminalAlignment {
 
 /// How the cursor is rendered on screen.
 #[derive(Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum CursorStyle {
     /// Invert all pixels in the character cell (requires framebuffer).
     /// Falls back to `Underline` without framebuffer.
+    #[default]
     Inverse,
     /// Thin line at the bottom of the character cell.
     Underline,
@@ -40,11 +42,6 @@ pub enum CursorStyle {
     Japanese,
 }
 
-impl Default for CursorStyle {
-    fn default() -> Self {
-        Self::Inverse
-    }
-}
 
 /// Cursor appearance and behavior.
 #[derive(Clone, Copy)]
