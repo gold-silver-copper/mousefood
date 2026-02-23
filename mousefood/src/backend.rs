@@ -454,8 +454,7 @@ where
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
 
-        let cursor_hidden =
-            self.cursor_config.blink && self.blink_config.slow.is_hidden();
+        let cursor_hidden = self.cursor_config.blink && self.blink_config.slow.is_hidden();
 
         if self.cursor_visible && !cursor_hidden {
             self.draw_cursor()?;
@@ -588,6 +587,7 @@ where
                 self.draw_cursor_line(top_left, 0, 0, 1, char_h, color)?;
                 self.draw_cursor_line(top_left, 0, char_w - 1, 1, char_h, color)
             }
+
             CursorStyle::Japanese => {
                 let color: C = self.cursor_color();
                 let corner = (char_w / 2).max(2);
@@ -641,8 +641,7 @@ where
                 .fill_contiguous(
                     &row_rect,
                     (top_left.x..top_left.x + char_w).map(|x| {
-                        let rgb: Rgb888 =
-                            self.buffer.get_pixel(geometry::Point::new(x, y)).into();
+                        let rgb: Rgb888 = self.buffer.get_pixel(geometry::Point::new(x, y)).into();
                         Rgb888::new(!rgb.r(), !rgb.g(), !rgb.b()).into()
                     }),
                 )
