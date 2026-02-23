@@ -26,6 +26,100 @@ pub enum TerminalAlignment {
     End,
 }
 
+/// How the cursor is rendered on screen.
+#[derive(Clone, Copy, PartialEq)]
+pub enum CursorStyle {
+    /// Invert all pixels in the character cell (requires framebuffer).
+    /// Falls back to `Underline` without framebuffer.
+    Inverse,
+    /// Thin line at the bottom of the character cell.
+    Underline,
+    /// Outline around the character cell.
+    Outline,
+}
+
+impl Default for CursorStyle {
+    fn default() -> Self {
+        Self::Inverse
+    }
+}
+
+/// Cursor appearance and behavior.
+#[derive(Clone, Copy)]
+pub struct CursorConfig {
+    /// Visual style of the cursor.
+    pub style: CursorStyle,
+    /// Whether the cursor blinks. Uses `BlinkConfig::slow` timing.
+    pub blink: bool,
+    /// Cursor color for non-inverse styles. `None` uses white.
+    pub color: Option<Rgb888>,
+}
+
+impl Default for CursorConfig {
+    fn default() -> Self {
+        Self {
+            style: CursorStyle::Outline,
+            blink: true,
+            color: None,
+        }
+    }
+}
+
+/// Timing parameters for a single blink pattern.
+#[derive(Clone, Copy)]
+pub struct BlinkTiming {
+    /// How many times per second the element toggles.
+    pub blinks_per_sec: u8,
+    /// Fraction of each cycle spent hidden (0.0–1.0).
+    pub duty: f32,
+}
+
+/// Blink configuration for text modifiers and cursor.
+///
+/// Frame-based timing: visibility is computed from `frame_count`, `fps`,
+/// and per-pattern `BlinkTiming`.
+#[derive(Clone, Copy)]
+pub struct BlinkConfig {
+    /// Display refresh rate. Converts frame counts to time.
+    pub fps: u8,
+    /// Timing for `Modifier::SLOW_BLINK` and cursor blink.
+    pub slow: BlinkTiming,
+    /// Timing for `Modifier::RAPID_BLINK`.
+    pub fast: BlinkTiming,
+}
+
+impl Default for BlinkConfig {
+    fn default() -> Self {
+        Self {
+            fps: 30,
+            slow: BlinkTiming {
+                blinks_per_sec: 1,
+                duty: 0.15,
+            },
+            fast: BlinkTiming {
+                blinks_per_sec: 3,
+                duty: 0.5,
+            },
+        }
+    }
+}
+
+impl BlinkTiming {
+    /// Returns `true` if the element should be hidden at the given frame count.
+    pub fn is_hidden(&self, frame_count: usize, fps: u8) -> bool {
+        if self.blinks_per_sec == 0 || fps == 0 {
+            return false;
+        }
+        let cycle_len = fps as usize / self.blinks_per_sec as usize;
+        if cycle_len == 0 {
+            return false;
+        }
+        let pos = frame_count % cycle_len;
+        let hidden_frames = ((self.duty * cycle_len as f32) as usize).max(1);
+        pos >= cycle_len - hidden_frames
+    }
+}
+
 /// Embedded backend configuration.
 pub struct EmbeddedBackendConfig<D, C>
 where
@@ -52,8 +146,11 @@ where
     /// Color theme that maps Ratatui colors to display pixels.
     pub color_theme: ColorTheme,
 
-    /// Speed at which cursor and modifiers blink. Lower is Slower, defaults to 2.
-    pub blink_speed: usize,
+    /// Cursor appearance and blink behavior.
+    pub cursor: CursorConfig,
+
+    /// Blink timing for text modifiers and cursor.
+    pub blink: BlinkConfig,
 }
 
 impl<D, C> Default for EmbeddedBackendConfig<D, C>
@@ -70,7 +167,8 @@ where
             vertical_alignment: TerminalAlignment::Start,
             horizontal_alignment: TerminalAlignment::Start,
             color_theme: ColorTheme::default(),
-            blink_speed: 2,
+            cursor: CursorConfig::default(),
+            blink: BlinkConfig::default(),
         }
     }
 }
@@ -124,9 +222,11 @@ where
     color_theme: ColorTheme,
     cursor_visible: bool,
     cursor_position: layout::Position,
+    cursor_config: CursorConfig,
     frame_count: usize,
-    blinking: Option<BlinkPhase>,
-    blink_speed: usize,
+    blink_config: BlinkConfig,
+    slow_hidden: bool,
+    fast_hidden: bool,
     blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
 }
 
@@ -147,7 +247,8 @@ where
             vertical_alignment,
             horizontal_alignment,
             color_theme,
-            blink_speed,
+            cursor,
+            blink,
         } = config;
         let pixels = layout::Size {
             width: display.bounding_box().size.width as u16,
@@ -188,9 +289,11 @@ where
             color_theme,
             cursor_visible: false,
             cursor_position: layout::Position::new(0, 0),
+            cursor_config: cursor,
             frame_count: 0,
-            blinking: None,
-            blink_speed,
+            blink_config: blink,
+            slow_hidden: false,
+            fast_hidden: false,
             blink_cells: BTreeMap::new(),
         }
     }
@@ -228,18 +331,21 @@ where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
         self.frame_count = self.frame_count.wrapping_add(1);
-        let prev_blinking = self.blinking;
 
-        let phase = self.frame_count % (1 + 120 / self.blink_speed.max(1) as usize);
-        let slow_hidden = phase == 0;
-        let fast_hidden = phase % (1 + 20 / self.blink_speed.max(1) as usize) == 0;
+        let prev_slow = self.slow_hidden;
+        let prev_fast = self.fast_hidden;
 
-        self.blinking = match (slow_hidden, fast_hidden) {
-            (true, true) => Some(BlinkPhase::Slow),  // both hidden
-            (false, true) => Some(BlinkPhase::Fast), // only fast hidden
-            _ => None,                               // all visible
-        };
-        let blink_toggled = self.blinking != prev_blinking;
+        self.slow_hidden = self
+            .blink_config
+            .slow
+            .is_hidden(self.frame_count, self.blink_config.fps);
+        self.fast_hidden = self
+            .blink_config
+            .fast
+            .is_hidden(self.frame_count, self.blink_config.fps);
+
+        let blink_toggled =
+            self.slow_hidden != prev_slow || self.fast_hidden != prev_fast;
 
         for (x, y, cell) in content {
             if cell.modifier.contains(style::Modifier::SLOW_BLINK)
@@ -253,9 +359,7 @@ where
             self.draw_cell(x, y, cell)?;
         }
 
-        // Avoids redrawing unnecessarily
         if blink_toggled && !self.blink_cells.is_empty() {
-            // Necessary to mem::take otherwise compiler complains about mutating self while iterating
             let cells = core::mem::take(&mut self.blink_cells);
             for (&(x, y), cell) in &cells {
                 self.draw_cell(x, y, cell)?;
@@ -341,19 +445,20 @@ where
         self.display
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
-        if self.cursor_visible && !(self.blinking == Some(BlinkPhase::Slow)) {
+
+        let cursor_hidden = self.cursor_config.blink
+            && self
+                .blink_config
+                .slow
+                .is_hidden(self.frame_count, self.blink_config.fps);
+
+        if self.cursor_visible && !cursor_hidden {
             self.draw_cursor()?;
         }
 
         (self.flush_callback)(self.display);
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum BlinkPhase {
-    Slow,
-    Fast,
 }
 
 impl<D, C> EmbeddedBackend<'_, D, C>
@@ -391,13 +496,13 @@ where
                 },
                 style::Modifier::UNDERLINED => style_builder.underline(),
                 style::Modifier::SLOW_BLINK => {
-                    if matches!(self.blinking, Some(BlinkPhase::Slow)) {
+                    if self.slow_hidden {
                         fg_color = bg_color;
                     }
                     style_builder
                 }
                 style::Modifier::RAPID_BLINK => {
-                    if self.blinking.is_some() {
+                    if self.fast_hidden {
                         fg_color = bg_color;
                     }
                     style_builder
@@ -456,29 +561,84 @@ where
             self.cursor_position.y as i32 * char_h,
         ) + self.char_offset;
 
-        #[cfg(feature = "framebuffer")]
-        for y in top_left.y..top_left.y + char_h {
-            for x in top_left.x..top_left.x + char_w {
-                let point = geometry::Point::new(x, y);
-                let rgb: Rgb888 = self.buffer.get_pixel(point).into();
-                let inverted: C = Rgb888::new(!rgb.r(), !rgb.g(), !rgb.b()).into();
-                self.display
-                    .draw_iter(core::iter::once(embedded_graphics::Pixel(point, inverted)))
-                    .map_err(|_| crate::error::Error::DrawError)?;
+        match self.cursor_config.style {
+            #[cfg(feature = "framebuffer")]
+            CursorStyle::Inverse => self.draw_cursor_inverse(top_left, char_w, char_h),
+
+            #[cfg(not(feature = "framebuffer"))]
+            CursorStyle::Inverse => {
+                // Can't read pixels without framebuffer, fall back to underline
+                let color: C = self.cursor_color();
+                self.draw_cursor_line(top_left, char_w, char_h - 1, 0, char_w, 1, color)
+            }
+
+            CursorStyle::Underline => {
+                let color: C = self.cursor_color();
+                self.draw_cursor_line(top_left, char_w, char_h - 1, 0, char_w, 1, color)
+            }
+
+            CursorStyle::Outline => {
+                let color: C = self.cursor_color();
+                // top
+                self.draw_cursor_line(top_left, char_w, 0, 0, char_w, 1, color)?;
+                // bottom
+                self.draw_cursor_line(top_left, char_w, char_h - 1, 0, char_w, 1, color)?;
+                // left
+                self.draw_cursor_line(top_left, char_w, 0, 0, 1, char_h, color)?;
+                // right
+                self.draw_cursor_line(top_left, char_w, 0, char_w - 1, 1, char_h, color)
             }
         }
+    }
 
-        #[cfg(not(feature = "framebuffer"))]
+    fn cursor_color(&self) -> C {
+        self.cursor_config.color.unwrap_or(Rgb888::WHITE).into()
+    }
+
+    fn draw_cursor_line(
+        &mut self,
+        top_left: geometry::Point,
+        _char_w: i32,
+        dy: i32,
+        dx: i32,
+        w: i32,
+        h: i32,
+        color: C,
+    ) -> Result<()> {
         self.display
             .fill_solid(
                 &embedded_graphics::primitives::Rectangle::new(
-                    geometry::Point::new(top_left.x, top_left.y + char_h - 1),
-                    geometry::Size::new(char_w as u32, 1),
+                    geometry::Point::new(top_left.x + dx, top_left.y + dy),
+                    geometry::Size::new(w as u32, h as u32),
                 ),
-                Rgb888::WHITE.into(),
+                color,
             )
-            .map_err(|_| crate::error::Error::DrawError)?;
+            .map_err(|_| crate::error::Error::DrawError)
+    }
 
+    #[cfg(feature = "framebuffer")]
+    fn draw_cursor_inverse(
+        &mut self,
+        top_left: geometry::Point,
+        char_w: i32,
+        char_h: i32,
+    ) -> Result<()> {
+        for y in top_left.y..top_left.y + char_h {
+            let row_rect = embedded_graphics::primitives::Rectangle::new(
+                geometry::Point::new(top_left.x, y),
+                geometry::Size::new(char_w as u32, 1),
+            );
+            self.display
+                .fill_contiguous(
+                    &row_rect,
+                    (top_left.x..top_left.x + char_w).map(|x| {
+                        let rgb: Rgb888 =
+                            self.buffer.get_pixel(geometry::Point::new(x, y)).into();
+                        Rgb888::new(!rgb.r(), !rgb.g(), !rgb.b()).into()
+                    }),
+                )
+                .map_err(|_| crate::error::Error::DrawError)?;
+        }
         Ok(())
     }
 }
