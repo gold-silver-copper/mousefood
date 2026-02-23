@@ -36,6 +36,8 @@ pub enum CursorStyle {
     Underline,
     /// Outline around the character cell.
     Outline,
+    /// Corner brackets 「」 — top-left and bottom-right corners.
+    Japanese,
 }
 
 impl Default for CursorStyle {
@@ -585,6 +587,16 @@ where
                 self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)?;
                 self.draw_cursor_line(top_left, 0, 0, 1, char_h, color)?;
                 self.draw_cursor_line(top_left, 0, char_w - 1, 1, char_h, color)
+            }
+            CursorStyle::Japanese => {
+                let color: C = self.cursor_color();
+                let corner = (char_w / 2).max(2);
+                // top-left corner: horizontal + vertical
+                self.draw_cursor_line(top_left, 0, 0, corner, 1, color)?;
+                self.draw_cursor_line(top_left, 0, 0, 1, corner, color)?;
+                // bottom-right corner: vertical + horizontal
+                self.draw_cursor_line(top_left, char_h - corner, char_w - 1, 1, corner, color)?;
+                self.draw_cursor_line(top_left, char_h - 1, char_w - corner, corner, 1, color)
             }
         }
     }
