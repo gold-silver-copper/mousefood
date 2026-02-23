@@ -58,7 +58,7 @@ pub struct CursorConfig {
 impl Default for CursorConfig {
     fn default() -> Self {
         Self {
-            style: CursorStyle::Outline,
+            style: CursorStyle::Inverse,
             blink: true,
             color: None,
         }
