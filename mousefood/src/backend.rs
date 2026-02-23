@@ -28,20 +28,17 @@ pub enum TerminalAlignment {
 
 /// How the cursor is rendered on screen.
 #[derive(Clone, Copy, PartialEq)]
-#[derive(Default)]
 pub enum CursorStyle {
     /// Invert all pixels in the character cell (requires framebuffer).
     /// Falls back to `Underline` without framebuffer.
-    #[default]
     Inverse,
     /// Thin line at the bottom of the character cell.
     Underline,
     /// Outline around the character cell.
     Outline,
-    /// Corner brackets 「」 — top-left and bottom-right corners.
+    /// Corner brackets 「」 — bottom-left and top-right corners.
     Japanese,
 }
-
 
 /// Cursor appearance and behavior.
 #[derive(Clone, Copy)]
@@ -588,12 +585,12 @@ where
             CursorStyle::Japanese => {
                 let color: C = self.cursor_color();
                 let corner = (char_w / 2).max(2);
-                // top-left corner: horizontal + vertical
-                self.draw_cursor_line(top_left, 0, 0, corner, 1, color)?;
-                self.draw_cursor_line(top_left, 0, 0, 1, corner, color)?;
-                // bottom-right corner: vertical + horizontal
-                self.draw_cursor_line(top_left, char_h - corner, char_w - 1, 1, corner, color)?;
-                self.draw_cursor_line(top_left, char_h - 1, char_w - corner, corner, 1, color)
+                // top-right corner: horizontal + vertical
+                self.draw_cursor_line(top_left, 0, char_w - corner, corner, 1, color)?;
+                self.draw_cursor_line(top_left, 0, char_w - 1, 1, corner, color)?;
+                // bottom-left corner: vertical + horizontal
+                self.draw_cursor_line(top_left, char_h - corner, 0, 1, corner, color)?;
+                self.draw_cursor_line(top_left, char_h - 1, 0, corner, 1, color)
             }
         }
     }
