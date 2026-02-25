@@ -48,7 +48,7 @@ pub struct CursorConfig {
     /// Visual style of the cursor.
     pub style: CursorStyle,
     /// Whether the cursor blinks. Uses `BlinkConfig::slow` timing.
-    /// Only effective with the `blink` feature enabled.
+    #[cfg(feature = "blink")]
     pub blink: bool,
     /// Cursor color for non-inverse styles. `None` uses white.
     pub color: Option<Rgb888>,
@@ -58,6 +58,7 @@ impl Default for CursorConfig {
     fn default() -> Self {
         Self {
             style: CursorStyle::Inverse,
+            #[cfg(feature = "blink")]
             blink: true,
             color: None,
         }
@@ -252,6 +253,7 @@ where
     cursor_visible: bool,
     cursor_position: layout::Position,
     cursor_config: CursorConfig,
+    #[cfg(feature = "blink")]
     frame_count: u16,
     #[cfg(feature = "blink")]
     blink_config: BlinkConfig,
@@ -320,6 +322,7 @@ where
             cursor_visible: false,
             cursor_position: layout::Position::new(0, 0),
             cursor_config: cursor,
+            #[cfg(feature = "blink")]
             frame_count: 0,
             #[cfg(feature = "blink")]
             blink_config: blink,
@@ -360,21 +363,20 @@ where
     where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
-        self.frame_count = self.frame_count.wrapping_add(1);
-
-        #[cfg(feature = "blink")]
-        let blink_toggled = self.blink_config.tick(self.frame_count);
-
         for (x, y, cell) in content {
+            self.draw_cell(x, y, cell)?;
+
             #[cfg(feature = "blink")]
             self.track_blink_cell(x, y, cell);
-
-            self.draw_cell(x, y, cell)?;
         }
 
         #[cfg(feature = "blink")]
-        if blink_toggled {
-            self.redraw_blink_cells()?;
+        {
+            self.frame_count = self.frame_count.wrapping_add(1);
+            let blink_toggled = self.blink_config.tick(self.frame_count);
+            if blink_toggled {
+                self.redraw_blink_cells()?;
+            }
         }
 
         Ok(())
