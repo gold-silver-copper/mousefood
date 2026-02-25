@@ -143,19 +143,6 @@ The cursor style can be set to `Inverse`, `Underline`, `Outline`, or `Japanese`
 (corner brackets). Inverse mode requires the `framebuffer` feature and falls back
 to underline without it.
 
-```rust
-use mousefood::prelude::*;
-
-let config = EmbeddedBackendConfig {
-    cursor: CursorConfig {
-        style: CursorStyle::Japanese,
-        color: Rgb888::WHITE, 
-        ..Default::default()
-    },
-    ..Default::default()
-};
-```
-
 Text blink modifiers (`SLOW_BLINK`, `RAPID_BLINK`) and cursor blinking are
 behind the `blink` feature flag to avoid unnecessary computation and memory
 usage when not needed:
@@ -165,20 +152,30 @@ usage when not needed:
 mousefood = { version = "*", features = ["blink"] }
 ```
 
-Blink timing is configurable:
-
 ```rust
 use mousefood::prelude::*;
+use mousefood::embedded_graphics::{mock_display::MockDisplay, pixelcolor::Rgb888};
 
-let config = EmbeddedBackendConfig {
-    #[cfg(feature = "blink")]
-    blink: BlinkConfig {
-        fps: 30,
-        slow: BlinkTiming { blinks_per_sec: 1, duty_percent: 15 },
-        fast: BlinkTiming { blinks_per_sec: 3, duty_percent: 50 },
-    },
-    ..Default::default()
-};
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut display = MockDisplay::<Rgb888>::new();
+    let config = EmbeddedBackendConfig {
+        cursor: CursorConfig {
+            style: CursorStyle::Japanese,
+            #[cfg(feature = "blink")]
+            blink: true,
+            color: Rgb888::WHITE,
+        },
+        #[cfg(feature = "blink")]
+        blink: BlinkConfig {
+            fps: 30,
+            slow: BlinkTiming { blinks_per_sec: 1, duty_percent: 15 },
+            fast: BlinkTiming { blinks_per_sec: 3, duty_percent: 50 },
+        },
+        ..Default::default()
+    };
+    let _backend = EmbeddedBackend::new(&mut display, config);
+    Ok(())
+}
 ```
 
 Without the `blink` feature, blink modifiers are silently ignored and the
