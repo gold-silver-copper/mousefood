@@ -50,8 +50,8 @@ pub struct CursorConfig {
     /// Whether the cursor blinks. Uses `BlinkConfig::slow` timing.
     #[cfg(feature = "blink")]
     pub blink: bool,
-    /// Cursor color for non-inverse styles. `None` uses white.
-    pub color: Option<Rgb888>,
+    /// Cursor color for non-inverse styles.
+    pub color: Rgb888,
 }
 
 impl Default for CursorConfig {
@@ -60,7 +60,7 @@ impl Default for CursorConfig {
             style: CursorStyle::Inverse,
             #[cfg(feature = "blink")]
             blink: true,
-            color: None,
+            color: Rgb888::WHITE,
         }
     }
 }
@@ -582,17 +582,17 @@ where
 
             #[cfg(not(feature = "framebuffer"))]
             CursorStyle::Inverse => {
-                let color: C = self.cursor_color();
+                let color: C = self.cursor_config.color.into();
                 self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)
             }
 
             CursorStyle::Underline => {
-                let color: C = self.cursor_color();
+                let color: C = self.cursor_config.color.into();
                 self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)
             }
 
             CursorStyle::Outline => {
-                let color: C = self.cursor_color();
+                let color: C = self.cursor_config.color.into();
                 self.draw_cursor_line(top_left, 0, 0, char_w, 1, color)?;
                 self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)?;
                 self.draw_cursor_line(top_left, 0, 0, 1, char_h, color)?;
@@ -600,7 +600,7 @@ where
             }
 
             CursorStyle::Japanese => {
-                let color: C = self.cursor_color();
+                let color: C = self.cursor_config.color.into();
                 let corner = (char_w / 2).max(2);
                 self.draw_cursor_line(top_left, 0, 0, corner, 1, color)?;
                 self.draw_cursor_line(top_left, 0, 0, 1, corner, color)?;
@@ -608,10 +608,6 @@ where
                 self.draw_cursor_line(top_left, char_h - 1, char_w - corner, corner, 1, color)
             }
         }
-    }
-
-    fn cursor_color(&self) -> C {
-        self.cursor_config.color.unwrap_or(Rgb888::WHITE).into()
     }
 
     fn draw_cursor_line(
