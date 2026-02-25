@@ -1,7 +1,9 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use core::marker::PhantomData;
 use embedded_graphics::prelude::RgbColor;
+
+#[cfg(feature = "blink")]
+use alloc::collections::BTreeMap;
 
 use crate::colors::*;
 use crate::default_font;
@@ -36,7 +38,7 @@ pub enum CursorStyle {
     Underline,
     /// Outline around the character cell.
     Outline,
-    /// Corner brackets 「」 — bottom-left and top-right corners.
+    /// Corner brackets — top-left and bottom-right corners.
     Japanese,
 }
 
@@ -46,6 +48,7 @@ pub struct CursorConfig {
     /// Visual style of the cursor.
     pub style: CursorStyle,
     /// Whether the cursor blinks. Uses `BlinkConfig::slow` timing.
+    /// Only effective with the `blink` feature enabled.
     pub blink: bool,
     /// Cursor color for non-inverse styles. `None` uses white.
     pub color: Option<Rgb888>,
@@ -65,43 +68,44 @@ impl Default for CursorConfig {
 #[derive(Clone, Copy)]
 pub struct BlinkTiming {
     /// How many times per second the element toggles.
-    pub blinks_per_sec: u8,
-    /// Fraction of each cycle spent hidden (0.0–1.0).
-    pub duty: f32,
+    pub blinks_per_sec: u16,
+    /// Percentage of each cycle spent hidden (0–100).
+    /// e.g. 15 means hidden 15% of each cycle.
+    pub duty_percent: u16,
     hidden: bool,
 }
 
+#[cfg(feature = "blink")]
 impl BlinkTiming {
     /// Returns `true` if the element is currently hidden.
     pub fn is_hidden(&self) -> bool {
         self.hidden
     }
 
-    fn update(&mut self, frame_count: usize, fps: u8) {
+    fn update(&mut self, frame_count: u16, fps: u16) {
         if self.blinks_per_sec == 0 || fps == 0 {
             self.hidden = false;
             return;
         }
-        let cycle_len = fps as usize / self.blinks_per_sec as usize;
+        let cycle_len = fps / self.blinks_per_sec;
         if cycle_len == 0 {
             self.hidden = false;
             return;
         }
         let pos = frame_count % cycle_len;
-        let hidden_frames = ((self.duty * cycle_len as f32) as usize).max(1);
+        let hidden_frames = ((self.duty_percent * cycle_len + 50) / 100).max(1);
         self.hidden = pos >= cycle_len - hidden_frames;
     }
 }
 
 /// Blink configuration for text modifiers and cursor.
 ///
-/// Frame-based timing: visibility is computed from `frame_count`, `fps`,
-/// and per-pattern `BlinkTiming`.
 /// Owns all blink state. Call [`BlinkConfig::tick`] once per frame to advance.
+#[cfg(feature = "blink")]
 #[derive(Clone, Copy)]
 pub struct BlinkConfig {
     /// Display refresh rate. Converts frame counts to time.
-    pub fps: u8,
+    pub fps: u16,
     /// Timing for `Modifier::SLOW_BLINK` and cursor blink.
     pub slow: BlinkTiming,
     /// Timing for `Modifier::RAPID_BLINK`.
@@ -109,9 +113,10 @@ pub struct BlinkConfig {
     prev_state: (bool, bool),
 }
 
+#[cfg(feature = "blink")]
 impl BlinkConfig {
     /// Advance blink state for the current frame. Returns `true` if visibility changed.
-    pub fn tick(&mut self, frame_count: usize) -> bool {
+    pub fn tick(&mut self, frame_count: u16) -> bool {
         self.slow.update(frame_count, self.fps);
         self.fast.update(frame_count, self.fps);
         let state = (self.slow.hidden, self.fast.hidden);
@@ -121,18 +126,19 @@ impl BlinkConfig {
     }
 }
 
+#[cfg(feature = "blink")]
 impl Default for BlinkConfig {
     fn default() -> Self {
         Self {
             fps: 30,
             slow: BlinkTiming {
                 blinks_per_sec: 1,
-                duty: 0.15,
+                duty_percent: 15,
                 hidden: false,
             },
             fast: BlinkTiming {
                 blinks_per_sec: 3,
-                duty: 0.5,
+                duty_percent: 50,
                 hidden: false,
             },
             prev_state: (false, false),
@@ -170,6 +176,7 @@ where
     pub cursor: CursorConfig,
 
     /// Blink timing for text modifiers and cursor.
+    #[cfg(feature = "blink")]
     pub blink: BlinkConfig,
 }
 
@@ -188,6 +195,7 @@ where
             horizontal_alignment: TerminalAlignment::Start,
             color_theme: ColorTheme::default(),
             cursor: CursorConfig::default(),
+            #[cfg(feature = "blink")]
             blink: BlinkConfig::default(),
         }
     }
@@ -243,8 +251,10 @@ where
     cursor_visible: bool,
     cursor_position: layout::Position,
     cursor_config: CursorConfig,
-    frame_count: usize,
+    frame_count: u16,
+    #[cfg(feature = "blink")]
     blink_config: BlinkConfig,
+    #[cfg(feature = "blink")]
     blink_cells: BTreeMap<(u16, u16), ratatui_core::buffer::Cell>,
 }
 
@@ -266,6 +276,7 @@ where
             horizontal_alignment,
             color_theme,
             cursor,
+            #[cfg(feature = "blink")]
             blink,
         } = config;
         let pixels = layout::Size {
@@ -278,12 +289,12 @@ where
 
         let off_x = match horizontal_alignment {
             TerminalAlignment::Start => 0,
-            TerminalAlignment::Center => extra_x / 2, //best effort, might be 1/2 pixel off
+            TerminalAlignment::Center => extra_x / 2,
             TerminalAlignment::End => extra_x,
         } as i32;
         let off_y = match vertical_alignment {
             TerminalAlignment::Start => 0,
-            TerminalAlignment::Center => extra_y / 2, //best effort, might be 1/2 pixel off
+            TerminalAlignment::Center => extra_y / 2,
             TerminalAlignment::End => extra_y,
         } as i32;
 
@@ -309,7 +320,9 @@ where
             cursor_position: layout::Position::new(0, 0),
             cursor_config: cursor,
             frame_count: 0,
+            #[cfg(feature = "blink")]
             blink_config: blink,
+            #[cfg(feature = "blink")]
             blink_cells: BTreeMap::new(),
         }
     }
@@ -347,26 +360,20 @@ where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
         self.frame_count = self.frame_count.wrapping_add(1);
+
+        #[cfg(feature = "blink")]
         let blink_toggled = self.blink_config.tick(self.frame_count);
 
         for (x, y, cell) in content {
-            if cell.modifier.contains(style::Modifier::SLOW_BLINK)
-                || cell.modifier.contains(style::Modifier::RAPID_BLINK)
-            {
-                self.blink_cells.insert((x, y), cell.clone());
-            } else {
-                self.blink_cells.remove(&(x, y));
-            }
+            #[cfg(feature = "blink")]
+            self.track_blink_cell(x, y, cell);
 
             self.draw_cell(x, y, cell)?;
         }
 
-        if blink_toggled && !self.blink_cells.is_empty() {
-            let cells = core::mem::take(&mut self.blink_cells);
-            for (&(x, y), cell) in &cells {
-                self.draw_cell(x, y, cell)?;
-            }
-            self.blink_cells = cells;
+        #[cfg(feature = "blink")]
+        if blink_toggled {
+            self.redraw_blink_cells()?;
         }
 
         Ok(())
@@ -448,10 +455,15 @@ where
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
 
-        let cursor_hidden = self.cursor_config.blink && self.blink_config.slow.is_hidden();
+        if self.cursor_visible {
+            #[cfg(feature = "blink")]
+            let hidden = self.cursor_config.blink && self.blink_config.slow.is_hidden();
+            #[cfg(not(feature = "blink"))]
+            let hidden = false;
 
-        if self.cursor_visible && !cursor_hidden {
-            self.draw_cursor()?;
+            if !hidden {
+                self.draw_cursor()?;
+            }
         }
 
         (self.flush_callback)(self.display);
@@ -493,12 +505,14 @@ where
                     Some(font) => style_builder.font(font),
                 },
                 style::Modifier::UNDERLINED => style_builder.underline(),
+                #[cfg(feature = "blink")]
                 style::Modifier::SLOW_BLINK => {
                     if self.blink_config.slow.is_hidden() {
                         fg_color = bg_color;
                     }
                     style_builder
                 }
+                #[cfg(feature = "blink")]
                 style::Modifier::RAPID_BLINK => {
                     if self.blink_config.fast.is_hidden() {
                         fg_color = bg_color;
@@ -585,12 +599,10 @@ where
             CursorStyle::Japanese => {
                 let color: C = self.cursor_color();
                 let corner = (char_w / 2).max(2);
-                // top-right corner: horizontal + vertical
-                self.draw_cursor_line(top_left, 0, char_w - corner, corner, 1, color)?;
-                self.draw_cursor_line(top_left, 0, char_w - 1, 1, corner, color)?;
-                // bottom-left corner: vertical + horizontal
-                self.draw_cursor_line(top_left, char_h - corner, 0, 1, corner, color)?;
-                self.draw_cursor_line(top_left, char_h - 1, 0, corner, 1, color)
+                self.draw_cursor_line(top_left, 0, 0, corner, 1, color)?;
+                self.draw_cursor_line(top_left, 0, 0, 1, corner, color)?;
+                self.draw_cursor_line(top_left, char_h - corner, char_w - 1, 1, corner, color)?;
+                self.draw_cursor_line(top_left, char_h - 1, char_w - corner, corner, 1, color)
             }
         }
     }
@@ -641,6 +653,29 @@ where
                 )
                 .map_err(|_| crate::error::Error::DrawError)?;
         }
+        Ok(())
+    }
+    #[cfg(feature = "blink")]
+    fn track_blink_cell(&mut self, x: u16, y: u16, cell: &ratatui_core::buffer::Cell) {
+        if cell.modifier.contains(style::Modifier::SLOW_BLINK)
+            || cell.modifier.contains(style::Modifier::RAPID_BLINK)
+        {
+            self.blink_cells.insert((x, y), cell.clone());
+        } else {
+            self.blink_cells.remove(&(x, y));
+        }
+    }
+
+    #[cfg(feature = "blink")]
+    fn redraw_blink_cells(&mut self) -> Result<()> {
+        if self.blink_cells.is_empty() {
+            return Ok(());
+        }
+        let cells = core::mem::take(&mut self.blink_cells);
+        for (&(x, y), cell) in &cells {
+            self.draw_cell(x, y, cell)?;
+        }
+        self.blink_cells = cells;
         Ok(())
     }
 }
