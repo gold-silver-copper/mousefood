@@ -65,6 +65,7 @@ impl Default for CursorConfig {
 }
 
 /// Timing parameters for a single blink pattern.
+#[cfg(feature = "blink")]
 #[derive(Clone, Copy)]
 pub struct BlinkTiming {
     /// How many times per second the element toggles.
