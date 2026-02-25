@@ -55,6 +55,7 @@ behind the `blink` feature flag). Since the struct is exhaustive, this is a brea
 anyone constructing it directly. The `blink` feature is disabled by default due to performance overhead.
 
 #### Migration guide
+
 ```diff
 let config = EmbeddedBackendConfig {
     flush_callback: Box::new(|_| {}),
