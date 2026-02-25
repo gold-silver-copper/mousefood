@@ -166,7 +166,6 @@ Blink timing is configurable:
 
 ```rust,ignore
 let config = EmbeddedBackendConfig {
-    #[cfg(feature = "blink")]
     blink: BlinkConfig {
         fps: 30,
         slow: BlinkTiming { blinks_per_sec: 1, duty_percent: 15 },
