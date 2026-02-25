@@ -187,6 +187,7 @@ where
     let rgb: Rgb888 = color.into();
     Rgb888::new(dim_u8(rgb.r()), dim_u8(rgb.g()), dim_u8(rgb.b())).into()
 }
+
 #[cfg(feature = "epd-weact")]
 impl<'a> From<TermColor<'a>> for weact_studio_epd::Color {
     fn from(color: TermColor<'a>) -> Self {
