@@ -175,8 +175,9 @@ impl<'a> From<TermColor<'a>> for BinaryColor {
         }
     }
 }
+
 fn dim_u8(v: u8) -> u8 {
-    (v >> 2) + (v >> 5) // ≈ 28%
+    v >> 1
 }
 
 pub fn dim_color<C>(color: C) -> C
