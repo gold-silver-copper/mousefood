@@ -139,9 +139,19 @@ Mousefood includes popular color themes that can be used directly:
 
 Mousefood supports configurable cursor styles and text blinking.
 
-The cursor style can be set to `Inverse`, `Underline`, `Outline`, or `Japanese`
-(corner brackets). Inverse mode requires the `framebuffer` feature and falls back
-to underline without it.
+The cursor style can be set to `Inverse` (default), `Underline`, `Outline`, or `Japanese`.
+Inverse mode requires the `framebuffer` feature and falls back to underline without it.
+
+```rust,ignore
+let config = EmbeddedBackendConfig {
+    cursor: CursorConfig {
+        style: CursorStyle::Japanese,
+        color: Rgb888::WHITE, 
+        ..Default::default()
+    },
+    ..Default::default()
+};
+```
 
 Text blink modifiers (`SLOW_BLINK`, `RAPID_BLINK`) and cursor blinking are
 behind the `blink` feature flag to avoid unnecessary computation and memory
@@ -152,30 +162,18 @@ usage when not needed:
 mousefood = { version = "*", features = ["blink"] }
 ```
 
-```rust,ignore
-use mousefood::prelude::*;
-use mousefood::embedded_graphics::{mock_display::MockDisplay, pixelcolor::Rgb888};
+Blink timing is configurable:
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut display = MockDisplay::<Rgb888>::new();
-    let config = EmbeddedBackendConfig {
-        cursor: CursorConfig {
-            style: CursorStyle::Japanese,
-            #[cfg(feature = "blink")]
-            blink: true,
-            color: Rgb888::WHITE,
-        },
-        #[cfg(feature = "blink")]
-        blink: BlinkConfig {
-            fps: 30,
-            slow: BlinkTiming { blinks_per_sec: 1, duty_percent: 15 },
-            fast: BlinkTiming { blinks_per_sec: 3, duty_percent: 50 },
-        },
-        ..Default::default()
-    };
-    let _backend = EmbeddedBackend::new(&mut display, config);
-    Ok(())
-}
+```rust,ignore
+let config = EmbeddedBackendConfig {
+    #[cfg(feature = "blink")]
+    blink: BlinkConfig {
+        fps: 30,
+        slow: BlinkTiming { blinks_per_sec: 1, duty_percent: 15 },
+        fast: BlinkTiming { blinks_per_sec: 3, duty_percent: 50 },
+    },
+    ..Default::default()
+};
 ```
 
 Without the `blink` feature, blink modifiers are silently ignored and the
