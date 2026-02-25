@@ -152,7 +152,7 @@ usage when not needed:
 mousefood = { version = "*", features = ["blink"] }
 ```
 
-```rust
+```rust,ignore
 use mousefood::prelude::*;
 use mousefood::embedded_graphics::{mock_display::MockDisplay, pixelcolor::Rgb888};
 
