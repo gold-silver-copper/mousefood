@@ -46,7 +46,6 @@ If you use per-cell underline colors, enable the feature explicitly:
 
 If you don't use underline colors, no changes are needed.
 
-
 ### New fields on `EmbeddedBackendConfig` ([#172])
 
 [#172]: https://github.com/ratatui/mousefood/pull/172
