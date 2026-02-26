@@ -176,6 +176,7 @@ impl<'a> From<TermColor<'a>> for BinaryColor {
     }
 }
 
+/// Helper function to dim a single u8 component by halving it.
 fn dim_u8(v: u8) -> u8 {
     v >> 1
 }
