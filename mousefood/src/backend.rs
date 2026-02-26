@@ -51,7 +51,7 @@ pub enum CursorStyle {
 pub struct CursorConfig {
     /// Visual style of the cursor.
     pub style: CursorStyle,
-    /// Whether the cursor blinks. Uses `BlinkConfig::slow` timing.
+    /// Whether the cursor blinks. Uses [`BlinkConfig::slow`] timing.
     #[cfg(feature = "blink")]
     pub blink: bool,
     /// Cursor color for non-inverse styles.
