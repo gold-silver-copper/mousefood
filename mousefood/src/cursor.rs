@@ -1,3 +1,5 @@
+//! Cursor configuration, styles, and rendering.
+
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::geometry;
 use embedded_graphics::pixelcolor::{PixelColor, Rgb888};
