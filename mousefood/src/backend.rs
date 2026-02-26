@@ -73,7 +73,7 @@ pub struct BlinkConfig {
     pub fps: u16,
     /// Timing for [`Modifier::SLOW_BLINK`] and cursor blink.
     pub slow: BlinkTiming,
-    /// Timing for `Modifier::RAPID_BLINK`.
+    /// Timing for [`Modifier::RAPID_BLINK`].
     pub fast: BlinkTiming,
     prev_state: (bool, bool),
 }
