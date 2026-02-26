@@ -71,7 +71,7 @@ impl BlinkTiming {
 pub struct BlinkConfig {
     /// Display refresh rate. Converts frame counts to time.
     pub fps: u16,
-    /// Timing for `Modifier::SLOW_BLINK` and cursor blink.
+    /// Timing for [`Modifier::SLOW_BLINK`] and cursor blink.
     pub slow: BlinkTiming,
     /// Timing for `Modifier::RAPID_BLINK`.
     pub fast: BlinkTiming,
