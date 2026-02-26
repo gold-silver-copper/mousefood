@@ -1,12 +1,11 @@
+use crate::colors::*;
+use crate::cursor::{Cursor, CursorConfig};
+use crate::default_font;
+use crate::error::Result;
 use alloc::boxed::Box;
-use core::marker::PhantomData;
-use embedded_graphics::prelude::RgbColor;
-
 #[cfg(feature = "blink")]
 use alloc::collections::BTreeMap;
-
-use crate::colors::*;
-use crate::default_font;
+use core::marker::PhantomData;
 use embedded_graphics::Drawable;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::geometry::{self, Dimensions};
@@ -26,43 +25,6 @@ pub enum TerminalAlignment {
     Center,
     /// Alignment with the end of the terminal: right or bottom.
     End,
-}
-
-/// How the cursor is rendered on screen.
-#[derive(Clone, Copy, PartialEq)]
-pub enum CursorStyle {
-    /// Invert all pixels in the character cell (requires framebuffer).
-    /// Falls back to `Underline` without framebuffer.
-    Inverse,
-    /// Thin line at the bottom of the character cell.
-    Underline,
-    /// Outline around the character cell.
-    Outline,
-    /// Corner brackets — top-left and bottom-right corners.
-    Japanese,
-}
-
-/// Cursor appearance and behavior.
-#[derive(Clone, Copy)]
-pub struct CursorConfig {
-    /// Visual style of the cursor.
-    pub style: CursorStyle,
-    /// Whether the cursor blinks. Uses `BlinkConfig::slow` timing.
-    #[cfg(feature = "blink")]
-    pub blink: bool,
-    /// Cursor color for non-inverse styles.
-    pub color: Rgb888,
-}
-
-impl Default for CursorConfig {
-    fn default() -> Self {
-        Self {
-            style: CursorStyle::Inverse,
-            #[cfg(feature = "blink")]
-            blink: true,
-            color: Rgb888::WHITE,
-        }
-    }
 }
 
 /// Timing parameters for a single blink pattern.
@@ -250,9 +212,7 @@ where
     columns_rows: layout::Size,
     pixels: layout::Size,
     color_theme: ColorTheme,
-    cursor_visible: bool,
-    cursor_position: layout::Position,
-    cursor_config: CursorConfig,
+    cursor: Cursor,
     #[cfg(feature = "blink")]
     frame_count: u16,
     #[cfg(feature = "blink")]
@@ -319,9 +279,7 @@ where
             },
             pixels,
             color_theme,
-            cursor_visible: false,
-            cursor_position: layout::Position::new(0, 0),
-            cursor_config: cursor,
+            cursor: Cursor::new(cursor),
             #[cfg(feature = "blink")]
             frame_count: 0,
             #[cfg(feature = "blink")]
@@ -350,8 +308,6 @@ where
     }
 }
 
-type Result<T, E = crate::error::Error> = core::result::Result<T, E>;
-
 impl<D, C> Backend for EmbeddedBackend<'_, D, C>
 where
     D: DrawTarget<Color = C> + 'static,
@@ -363,13 +319,6 @@ where
     where
         I: Iterator<Item = (u16, u16, &'a ratatui_core::buffer::Cell)>,
     {
-        for (x, y, cell) in content {
-            self.draw_cell(x, y, cell)?;
-
-            #[cfg(feature = "blink")]
-            self.track_blink_cell(x, y, cell);
-        }
-
         #[cfg(feature = "blink")]
         {
             self.frame_count = self.frame_count.wrapping_add(1);
@@ -379,25 +328,32 @@ where
             }
         }
 
+        for (x, y, cell) in content {
+            #[cfg(feature = "blink")]
+            self.track_blink_cell(x, y, cell);
+
+            self.draw_cell(x, y, cell)?;
+        }
+
         Ok(())
     }
 
     fn hide_cursor(&mut self) -> Result<()> {
-        self.cursor_visible = false;
+        self.cursor.visible = false;
         Ok(())
     }
 
     fn show_cursor(&mut self) -> Result<()> {
-        self.cursor_visible = true;
+        self.cursor.visible = true;
         Ok(())
     }
 
     fn get_cursor_position(&mut self) -> Result<layout::Position> {
-        Ok(self.cursor_position)
+        Ok(self.cursor.position)
     }
 
     fn set_cursor_position<P: Into<layout::Position>>(&mut self, position: P) -> Result<()> {
-        self.cursor_position = position.into();
+        self.cursor.position = position.into();
         Ok(())
     }
 
@@ -458,14 +414,23 @@ where
             .fill_contiguous(&self.display.bounding_box(), &self.buffer)
             .map_err(|_| crate::error::Error::DrawError)?;
 
-        if self.cursor_visible {
+        if self.cursor.visible {
             #[cfg(feature = "blink")]
-            let hidden = self.cursor_config.blink && self.blink_config.slow.is_hidden();
+            let hidden = self.cursor.config.blink && self.blink_config.slow.is_hidden();
             #[cfg(not(feature = "blink"))]
             let hidden = false;
 
             if !hidden {
-                self.draw_cursor()?;
+                let char_w = self.font_regular.character_size.width as i32;
+                let char_h = self.font_regular.character_size.height as i32;
+                self.cursor.draw(
+                    self.display,
+                    #[cfg(feature = "framebuffer")]
+                    &self.buffer,
+                    self.char_offset,
+                    char_w,
+                    char_h,
+                )?;
             }
         }
 
@@ -568,92 +533,6 @@ where
         Ok(())
     }
 
-    fn draw_cursor(&mut self) -> Result<()> {
-        let char_w = self.font_regular.character_size.width as i32;
-        let char_h = self.font_regular.character_size.height as i32;
-        let top_left = geometry::Point::new(
-            self.cursor_position.x as i32 * char_w,
-            self.cursor_position.y as i32 * char_h,
-        ) + self.char_offset;
-
-        match self.cursor_config.style {
-            #[cfg(feature = "framebuffer")]
-            CursorStyle::Inverse => self.draw_cursor_inverse(top_left, char_w, char_h),
-
-            #[cfg(not(feature = "framebuffer"))]
-            CursorStyle::Inverse => {
-                let color: C = self.cursor_config.color.into();
-                self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)
-            }
-
-            CursorStyle::Underline => {
-                let color: C = self.cursor_config.color.into();
-                self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)
-            }
-
-            CursorStyle::Outline => {
-                let color: C = self.cursor_config.color.into();
-                self.draw_cursor_line(top_left, 0, 0, char_w, 1, color)?;
-                self.draw_cursor_line(top_left, char_h - 1, 0, char_w, 1, color)?;
-                self.draw_cursor_line(top_left, 0, 0, 1, char_h, color)?;
-                self.draw_cursor_line(top_left, 0, char_w - 1, 1, char_h, color)
-            }
-
-            CursorStyle::Japanese => {
-                let color: C = self.cursor_config.color.into();
-                let corner = (char_w / 2).max(2);
-                self.draw_cursor_line(top_left, 0, 0, corner, 1, color)?;
-                self.draw_cursor_line(top_left, 0, 0, 1, corner, color)?;
-                self.draw_cursor_line(top_left, char_h - corner, char_w - 1, 1, corner, color)?;
-                self.draw_cursor_line(top_left, char_h - 1, char_w - corner, corner, 1, color)
-            }
-        }
-    }
-
-    fn draw_cursor_line(
-        &mut self,
-        top_left: geometry::Point,
-        dy: i32,
-        dx: i32,
-        w: i32,
-        h: i32,
-        color: C,
-    ) -> Result<()> {
-        self.display
-            .fill_solid(
-                &embedded_graphics::primitives::Rectangle::new(
-                    geometry::Point::new(top_left.x + dx, top_left.y + dy),
-                    geometry::Size::new(w as u32, h as u32),
-                ),
-                color,
-            )
-            .map_err(|_| crate::error::Error::DrawError)
-    }
-
-    #[cfg(feature = "framebuffer")]
-    fn draw_cursor_inverse(
-        &mut self,
-        top_left: geometry::Point,
-        char_w: i32,
-        char_h: i32,
-    ) -> Result<()> {
-        for y in top_left.y..top_left.y + char_h {
-            let row_rect = embedded_graphics::primitives::Rectangle::new(
-                geometry::Point::new(top_left.x, y),
-                geometry::Size::new(char_w as u32, 1),
-            );
-            self.display
-                .fill_contiguous(
-                    &row_rect,
-                    (top_left.x..top_left.x + char_w).map(|x| {
-                        let rgb: Rgb888 = self.buffer.get_pixel(geometry::Point::new(x, y)).into();
-                        Rgb888::new(!rgb.r(), !rgb.g(), !rgb.b()).into()
-                    }),
-                )
-                .map_err(|_| crate::error::Error::DrawError)?;
-        }
-        Ok(())
-    }
     #[cfg(feature = "blink")]
     fn track_blink_cell(&mut self, x: u16, y: u16, cell: &ratatui_core::buffer::Cell) {
         if cell.modifier.contains(style::Modifier::SLOW_BLINK)
