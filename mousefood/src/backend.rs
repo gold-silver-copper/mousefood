@@ -31,8 +31,12 @@ pub enum TerminalAlignment {
 /// How the cursor is rendered on screen.
 #[derive(Clone, Copy, PartialEq)]
 pub enum CursorStyle {
-    /// Invert all pixels in the character cell (requires framebuffer).
-    /// Falls back to `Underline` without framebuffer.
+    /// Invert all pixels in the character cell.
+    ///
+    /// # Note
+    ///
+    /// This requires the `framebuffer` feature to be enabled.
+    /// Falls back to [`CursorStyle::Underline`] without `framebuffer`.
     Inverse,
     /// Thin line at the bottom of the character cell.
     Underline,
