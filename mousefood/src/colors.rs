@@ -176,10 +176,15 @@ impl<'a> From<TermColor<'a>> for BinaryColor {
     }
 }
 
+/// Helper function to dim a single u8 component by halving it.
 fn dim_u8(v: u8) -> u8 {
     v >> 1
 }
 
+/// Dim the color by halving each RGB component.
+///
+/// This is a simple way to create a "darker" version
+/// of the color.
 pub fn dim_color<C>(color: C) -> C
 where
     C: Into<Rgb888> + From<Rgb888>,
