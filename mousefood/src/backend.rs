@@ -88,6 +88,7 @@ impl BlinkTiming {
         self.hidden
     }
 
+    /// Update hidden state based on the current frame count and FPS.
     fn update(&mut self, frame_count: u16, fps: u16) {
         if self.blinks_per_sec == 0 || fps == 0 {
             self.hidden = false;
